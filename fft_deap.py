@@ -1,7 +1,10 @@
 import copy
 import random
+import sys
 
 import numpy
+
+import operator
 
 from functools import partial
 import functools
@@ -15,6 +18,8 @@ from deap import gp
 from inspect import isclass
 
 from chopsticks import ChopsticksSimulator
+
+import multiprocessing
 
 def fft_generate(pset, type_=None):
     if type_ is None:
@@ -58,6 +63,10 @@ class Null(): pass
 
 class Bool(): pass
 
+class MyHandBool(): pass
+
+class OppHandBool(): pass
+
 def generateHandName():
     return random.randint(0, 1)
 
@@ -69,24 +78,37 @@ cs = ChopsticksSimulator()
 pset = gp.PrimitiveSetTyped("MAIN", [], Null)
 
 # Nested If then elses
-pset.addPrimitive(if_then_else, [Bool, HandAction, Null], Null)
-pset.addPrimitive(if2_then_else, [Bool, Bool, HandAction, Null], Null)
-pset.addPrimitive(if3_then_else, [Bool, Bool, Bool, HandAction, Null], Null)
-pset.addPrimitive(if4_then_else, [Bool, Bool, Bool, Bool, HandAction, Null], Null)
+pset.addPrimitive(if_then_else, [MyHandBool, HandAction, Null], Null)
+pset.addPrimitive(if_then_else, [OppHandBool, HandAction, Null], Null)
+
+pset.addPrimitive(if2_then_else, [MyHandBool, MyHandBool, HandAction, Null], Null)
+pset.addPrimitive(if2_then_else, [MyHandBool, OppHandBool, HandAction, Null], Null)
+
+pset.addPrimitive(if3_then_else, [MyHandBool, MyHandBool, OppHandBool, HandAction, Null], Null)
+pset.addPrimitive(if3_then_else, [MyHandBool, OppHandBool, OppHandBool, HandAction, Null], Null)
+
+pset.addPrimitive(if4_then_else, [MyHandBool, MyHandBool, OppHandBool, OppHandBool, HandAction, Null], Null)
 
 # Terminal If then elses
-pset.addPrimitive(if_then_else, [Bool, HandAction, HandAction], Null)
-pset.addPrimitive(if2_then_else, [Bool, Bool, HandAction, HandAction], Null)
-pset.addPrimitive(if3_then_else, [Bool, Bool, Bool, HandAction, HandAction], Null)
-pset.addPrimitive(if4_then_else, [Bool, Bool, Bool, Bool, HandAction, HandAction], Null)
+pset.addPrimitive(if_then_else, [MyHandBool, HandAction, HandAction], Null)
+pset.addPrimitive(if_then_else, [OppHandBool, HandAction, HandAction], Null)
+
+pset.addPrimitive(if2_then_else, [MyHandBool, MyHandBool, HandAction, HandAction], Null)
+pset.addPrimitive(if2_then_else, [MyHandBool, OppHandBool, HandAction, HandAction], Null)
+
+pset.addPrimitive(if3_then_else, [MyHandBool, MyHandBool, OppHandBool, HandAction, HandAction], Null)
+pset.addPrimitive(if3_then_else, [MyHandBool, OppHandBool, OppHandBool, HandAction, HandAction], Null)
+
+pset.addPrimitive(if4_then_else, [MyHandBool, MyHandBool, OppHandBool, OppHandBool, HandAction, HandAction], Null)
 
 # Conditions
-pset.addPrimitive(cs.hand_greater, [HandName, HandValue], Bool)
-pset.addPrimitive(cs.hand_equal, [HandName, HandValue], Bool)
-pset.addPrimitive(cs.hand_less, [HandName, HandValue], Bool)
-pset.addPrimitive(cs.opp_hand_greater, [HandName, HandValue], Bool)
-pset.addPrimitive(cs.opp_hand_equal, [HandName, HandValue], Bool)
-pset.addPrimitive(cs.opp_hand_less, [HandName, HandValue], Bool)
+pset.addPrimitive(cs.hand_greater, [HandName, HandValue], MyHandBool)
+pset.addPrimitive(cs.hand_equal, [HandName, HandValue], MyHandBool)
+pset.addPrimitive(cs.hand_less, [HandName, HandValue], MyHandBool)
+
+pset.addPrimitive(cs.opp_hand_greater, [HandName, HandValue], OppHandBool)
+pset.addPrimitive(cs.opp_hand_equal, [HandName, HandValue], OppHandBool)
+pset.addPrimitive(cs.opp_hand_less, [HandName, HandValue], OppHandBool)
 
 # Actions
 pset.addPrimitive(cs.attack, [HandName, HandName], HandAction)
@@ -98,15 +120,6 @@ pset.addEphemeralConstant(name="hand_value", ephemeral=generateHandValue, ret_ty
 
 creator.create("FitnessMax", base.Fitness, weights=(1.0,))
 creator.create("Individual", gp.PrimitiveTree, fitness=creator.FitnessMax)
-
-toolbox = base.Toolbox()
-
-# Attribute generator
-toolbox.register("expr_init", fft_generate, pset=pset)
-
-# Structure initializers
-toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.expr_init)
-toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 
 def evalChopsticks(individual):
     NUM_EVALS = 25
@@ -121,26 +134,55 @@ def evalChopsticks(individual):
 
     return (my_wins / NUM_EVALS,)
 
+toolbox = base.Toolbox()
+
+# Attribute generator
+toolbox.register("expr_init", fft_generate, pset=pset)
+
+# Structure initializers
+toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.expr_init)
+toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+
 toolbox.register("evaluate", evalChopsticks)
-toolbox.register("select", tools.selTournament, tournsize=10)
+toolbox.register("select", tools.selTournament, tournsize=300)
 toolbox.register("mate", gp.cxOnePoint)
 toolbox.register("expr_mut", fft_generate)
 toolbox.register("mutate", gp.mutUniform, expr=toolbox.expr_mut, pset=pset)
 
-def evolve_players(ngen=50):
-    pop = toolbox.population(n=800)
-    hof = tools.HallOfFame(10)
+toolbox.decorate("mate", gp.staticLimit(key=operator.attrgetter('height'), max_value=60))
+toolbox.decorate("mutate", gp.staticLimit(key=operator.attrgetter('height'), max_value=60))
+
+def evolve_players(ngen=40, pop=None):
+    if pop is None:
+        pop = toolbox.population(n=20000)
+    hof = tools.HallOfFame(25)
     stats = tools.Statistics(lambda ind: ind.fitness.values)
     stats.register("avg", numpy.mean)
+    stats.register("med", numpy.median)
     stats.register("std", numpy.std)
-    stats.register("min", numpy.min)
     stats.register("max", numpy.max)
 
     algorithms.eaSimple(pop, toolbox, 0.5, 0.2, ngen, stats, halloffame=hof)
 
     return pop, hof, stats
 
-if __name__ == "__main__":
-    cs.set_opp_strat([cs.heuristic_random_move])
-    pop, hof, stats = evolve_players()
-    print(hof[0])
+if __name__ == '__main__':
+    filename = sys.argv[1]
+    f = open(filename, 'w')
+
+    pool = multiprocessing.Pool(processes=4)
+    toolbox.register("map", pool.map)
+
+    pop, hof, stats = evolve_players(ngen=20)
+    for i in range(5):
+        f.write(str(hof[0]))
+        f.write('\n\n')
+        new_strats = [gp.compile(s, pset) for s in hof]
+        cs.set_opp_strat(new_strats)
+        for ind in pop:
+            del ind.fitness.values
+        pop, hof, stats = evolve_players(ngen=20, pop=pop)
+    f.write("FINAL TOP 10\n\n")
+    for i in range(10):
+        f.write(str(hof[i]))
+        f.write('\n\n')

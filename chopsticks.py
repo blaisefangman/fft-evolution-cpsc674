@@ -31,7 +31,7 @@ class ChopsticksSimulator():
         self.num_moves = 0
 
     def is_finished(self):
-        return self.num_moves >= self.max_moves or sum(self.hands[0]) == 0 or sum(self.hands[1]) == 0
+        return sum(self.hands[0]) == 0 or sum(self.hands[1]) == 0 or self.num_moves >= self.max_moves
 
     def winner(self):
         if sum(self.hands[1]) > 0:
@@ -50,20 +50,26 @@ class ChopsticksSimulator():
         move()
 
     def heuristic_random_move(self):
-        if self.hands[self.num_moves % 2][0] + self.hands[(self.num_moves + 1) % 2][0] >= 5:
+        me = self.num_moves % 2
+        opp = (self.num_moves + 1) % 2
+        if self.hands[me][0] + self.hands[opp][0] >= 5:
             self.do_attack(0, 0)
-        elif self.hands[self.num_moves % 2][0] + self.hands[(self.num_moves + 1) % 2][1] >= 5:
+        elif self.hands[me][0] + self.hands[opp][1] >= 5:
             self.do_attack(0, 1)
-        elif self.hands[self.num_moves % 2][1] + self.hands[(self.num_moves + 1) % 2][0] >= 5:
+        elif self.hands[me][1] + self.hands[opp][0] >= 5:
             self.do_attack(1, 0)
-        elif self.hands[self.num_moves % 2][1] + self.hands[(self.num_moves + 1) % 2][1] >= 5:
+        elif self.hands[me][1] + self.hands[opp][1] >= 5:
             self.do_attack(1, 1)
-        elif ((self.hands[self.num_moves % 2][0] == 0 or self.hands[self.num_moves % 2][1] == 0)
-              and sum(self.hands[self.num_moves % 2]) >= 2):
-            left = self.hands[self.num_moves % 2][1] // 2
-            self.do_transfer(left, self.hands[self.num_moves % 2][1] - left)
+        elif ((self.hands[me][0] == 0 or self.hands[me][1] == 0)
+              and sum(self.hands[me]) >= 2):
+            total = sum(self.hands[self.num_moves % 2])
+            left = total // 2
+            self.do_transfer(left, total - left)
         else:
             self.random_move()
+
+        if sum(self.hands[me]) == 0:
+            print("BUG IN YOUR AGENT")
 
     def do_attack(self, fro, to):
         if self.hands[self.num_moves % 2][fro] == 0 or self.hands[(self.num_moves + 1) % 2][to] == 0:
@@ -79,7 +85,7 @@ class ChopsticksSimulator():
         return lambda: self.do_attack(fro, to)
 
     def do_transfer(self, left, right):
-        if sum(self.hands[self.num_moves % 2]) != (left + right) or left == 0 or right == 0:
+        if sum(self.hands[self.num_moves % 2]) != (left + right) or left == 0 or right == 0 or left >= 5 or right >= 5:
             self.hands[self.num_moves % 2] = [0, 0]
             return
         self.hands[self.num_moves % 2] = [left, right]
@@ -89,23 +95,26 @@ class ChopsticksSimulator():
         return lambda: self.do_transfer(left, right)
 
     def valid_moves(self):
+        me = self.num_moves % 2
+        opp = (self.num_moves + 1) % 2
         attacks = []
-        if self.hands[self.num_moves % 2][0] > 0:
-            attacks += [self.attack(0, to) for to in range(2) if self.hands[(self.num_moves + 1) % 2][to] > 0]
-        if self.hands[self.num_moves % 2][1] > 0:
-            attacks += [self.attack(1, to) for to in range(2) if self.hands[(self.num_moves + 1) % 2][to] > 0]
+        if self.hands[me][0] > 0:
+            attacks += [self.attack(0, to) for to in range(2) if self.hands[opp][to] > 0]
+        if self.hands[me][1] > 0:
+            attacks += [self.attack(1, to) for to in range(2) if self.hands[opp][to] > 0]
 
         transfers = []
-        my_sticks = sum(self.hands[self.num_moves % 2])
-        if self.hands[self.num_moves % 2][0] == 0 and my_sticks > 1:
+        my_sticks = sum(self.hands[me])
+        if self.hands[me][0] == 0 and my_sticks > 1:
             transfers += [self.transfer(left, my_sticks - left) for left in range(1, my_sticks)]
-        if self.hands[self.num_moves % 2][1] == 0 and my_sticks > 1:
+        if self.hands[me][1] == 0 and my_sticks > 1:
             transfers += [self.transfer(my_sticks - right, right) for right in range(1, my_sticks)]
-        if self.hands[self.num_moves % 2][0] > 0 and self.hands[self.num_moves % 2][1] > 0:
+        if self.hands[me][0] > 0 and self.hands[me][1] > 0:
             transfers += [self.transfer(left, my_sticks - left)
-                          for left in range(1, my_sticks)
-                          if left != self.hands[self.num_moves % 2][0]
-                          and left != self.hands[self.num_moves % 2][1]]
+                          for left in range(1, min(my_sticks, 5))
+                          if left != self.hands[me][0]
+                          and left != self.hands[me][1]
+                          and my_sticks - left < 5]
 
         return attacks + transfers
 
